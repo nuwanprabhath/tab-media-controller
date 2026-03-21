@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Media Controller",
+  "description": "Pause and play video/audio in any tab without switching to it",
+  "version": "1.0.0",
+  "permissions": ["tabs", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "toggle-media": {
+      "suggested_key": {
+        "default": "Alt+P",
+        "mac": "Alt+P"
+      },
+      "description": "Pause/Play media in the most recent audible tab"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
