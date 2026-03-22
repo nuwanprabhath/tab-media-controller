@@ -38,13 +38,69 @@
       color: #cdd6f4;
     }
 
-    .header .shortcut {
+    .header-controls {
       margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .header .shortcut {
       font-size: 11px;
       color: #6c7086;
       background: #313244;
       padding: 2px 6px;
       border-radius: 4px;
+    }
+
+    .btn-autoplay {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: #313244;
+      border: none;
+      color: #6c7086;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+      position: relative;
+    }
+
+    .btn-autoplay:hover {
+      background: #45475a;
+    }
+
+    .btn-autoplay.active {
+      background: #a6e3a1;
+      color: #1e1e2e;
+    }
+
+    .btn-autoplay svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .btn-autoplay::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #313244;
+      color: #cdd6f4;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+
+    .btn-autoplay:hover::after {
+      opacity: 1;
     }
 
     .empty-state {
@@ -96,23 +152,43 @@
       flex: 1;
       min-width: 0;
       cursor: pointer;
+      overflow: hidden;
     }
 
-    .tab-title {
+    .tab-title, .tab-url {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: block;
+    }
+
+    .tab-title {
       font-size: 13px;
       color: #cdd6f4;
     }
 
     .tab-url {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
       font-size: 11px;
       color: #6c7086;
       margin-top: 2px;
+    }
+
+    .tab-title .scroll-inner, .tab-url .scroll-inner {
+      display: inline-block;
+    }
+
+    .tab-info:hover .overflowing {
+      text-overflow: clip;
+    }
+
+    .tab-info:hover .overflowing .scroll-inner {
+      animation: scroll-text var(--scroll-duration, 4s) linear 0.3s infinite;
+    }
+
+    @keyframes scroll-text {
+      0%, 10% { transform: translateX(0); }
+      45%, 55% { transform: translateX(var(--scroll-distance)); }
+      90%, 100% { transform: translateX(0); }
     }
 
     .tab-controls {
@@ -179,6 +255,27 @@
       height: 16px;
     }
 
+    .btn-pip {
+      background: transparent;
+      color: #6c7086;
+    }
+
+    .btn-pip:hover {
+      background: #89b4fa;
+      color: white;
+      transform: scale(1.05);
+    }
+
+    .btn-pip.active {
+      background: #89b4fa;
+      color: white;
+    }
+
+    .btn-pip svg {
+      width: 14px;
+      height: 14px;
+    }
+
     .btn-close {
       background: transparent;
       color: #6c7086;
@@ -215,6 +312,16 @@
       background: #f9e2af;
     }
 
+    .remaining-time {
+      font-size: 10px;
+      color: #a6adc8;
+      font-variant-numeric: tabular-nums;
+      width: 42px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.4; }
@@ -230,7 +337,13 @@
 <body>
   <div class="header">
     <h1>Media Controller</h1>
-    <span class="shortcut">Alt+P</span>
+    <div class="header-controls">
+      <button id="autoplay-toggle" class="btn-autoplay" data-tooltip="Auto-play next video when current ends">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+        Autoplay
+      </button>
+      <span class="shortcut">Alt+P</span>
+    </div>
   </div>
   <div id="content">
     <div class="loading">Scanning tabs...</div>

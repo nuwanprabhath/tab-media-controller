@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Tab Media Controller",
-  "description": "Pause and play video/audio in any tab without switching to it",
+  "description": "Control media across tabs without switching to them. Play/pause, Picture-in-Picture, and autoplay playlist support.",
   "version": "1.0.0",
-  "permissions": ["tabs", "scripting", "activeTab"],
+  "permissions": ["tabs", "scripting", "activeTab", "storage", "alarms"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
