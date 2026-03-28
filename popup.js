@@ -48,6 +48,27 @@ async function loadTabs() {
     }
   }
 
+  // Also include tabs that are in the saved tab order (added via context menu)
+  // even if they haven't started playing yet
+  const savedOrder = await chrome.runtime.sendMessage({ action: "getTabOrder" });
+  if (savedOrder && savedOrder.length > 0) {
+    const allTabIds = new Set(allTabs.map((t) => t.id));
+    const mediaTabIds = new Set(mediaTabs.map((t) => t.id));
+
+    // Clean up stale tab IDs (tabs that no longer exist)
+    const validOrder = savedOrder.filter((id) => allTabIds.has(id));
+    if (validOrder.length !== savedOrder.length) {
+      chrome.runtime.sendMessage({ action: "setTabOrder", order: validOrder });
+    }
+
+    for (const tabId of validOrder) {
+      if (!mediaTabIds.has(tabId)) {
+        const tab = allTabs.find((t) => t.id === tabId);
+        if (tab) mediaTabs.push(tab);
+      }
+    }
+  }
+
   if (mediaTabs.length === 0) {
     content.innerHTML = `
       <div class="empty-state">
@@ -56,6 +77,17 @@ async function loadTabs() {
       </div>
     `;
     return;
+  }
+  if (savedOrder && savedOrder.length > 0) {
+    mediaTabs.sort((a, b) => {
+      const ai = savedOrder.indexOf(a.id);
+      const bi = savedOrder.indexOf(b.id);
+      // Tabs NOT in savedOrder come first (keep their original order)
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return -1;
+      if (bi === -1) return 1;
+      return ai - bi;
+    });
   }
 
   const list = document.createElement("ul");
@@ -81,8 +113,10 @@ async function createTabItem(tab) {
   } catch (e) {
     // ignore
   }
-  // Only fall back to audible hint if probe returned unknown
-  if (state === "unknown" && tab.audible) state = "playing";
+  // Normalize — only "playing" and "paused" are valid display states
+  if (state !== "playing" && state !== "paused") {
+    state = "paused";
+  }
 
   let pipActive = false;
   try {
@@ -94,7 +128,11 @@ async function createTabItem(tab) {
   const favicon = tab.favIconUrl || "";
   const hostname = tab.url ? new URL(tab.url).hostname : "";
 
+  const DRAG_ICON = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h2v2H9zm4 0h2v2h-2zM9 7h2v2H9zm4 0h2v2h-2zM9 11h2v2H9zm4 0h2v2h-2zM9 15h2v2H9zm4 0h2v2h-2zM9 19h2v2H9zm4 0h2v2h-2z"/></svg>`;
+
+  li.dataset.tabId = String(tab.id);
   li.innerHTML = `
+    <div class="drag-handle" title="Drag to reorder">${DRAG_ICON}</div>
     <div class="status-dot ${state}"></div>
     <span class="remaining-time" data-tab-id="${tab.id}"></span>
     ${favicon ? `<img class="tab-favicon" src="${escapeHtml(favicon)}" alt="">` : `<div class="tab-favicon"></div>`}
@@ -126,6 +164,46 @@ async function createTabItem(tab) {
       const duration = Math.max(3, overflow / 30);
       titleEl.style.setProperty("--scroll-duration", `${duration}s`);
     }
+  });
+
+  // Drag to reorder
+  const handle = li.querySelector(".drag-handle");
+  handle.addEventListener("mousedown", () => { li.draggable = true; });
+  handle.addEventListener("mouseup", () => { li.draggable = false; });
+
+  li.addEventListener("dragstart", (e) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", tab.id);
+    setTimeout(() => li.classList.add("dragging"), 0);
+  });
+
+  li.addEventListener("dragend", () => {
+    li.draggable = false;
+    li.classList.remove("dragging");
+    document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+    saveOrder();
+  });
+
+  li.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const dragging = document.querySelector(".dragging");
+    if (!dragging || dragging === li) return;
+    document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+    li.classList.add("drag-over");
+  });
+
+  li.addEventListener("dragleave", () => {
+    li.classList.remove("drag-over");
+  });
+
+  li.addEventListener("drop", (e) => {
+    e.preventDefault();
+    li.classList.remove("drag-over");
+    const dragging = document.querySelector(".dragging");
+    if (!dragging || dragging === li) return;
+    const list = li.parentNode;
+    list.insertBefore(dragging, li);
   });
 
   // Click tab info to switch to that tab
@@ -251,6 +329,12 @@ async function createTabItem(tab) {
   timeIntervals.push(interval);
 
   return li;
+}
+
+function saveOrder() {
+  const items = document.querySelectorAll(".tab-item[data-tab-id]");
+  const order = [...items].map((el) => Number(el.dataset.tabId));
+  chrome.runtime.sendMessage({ action: "setTabOrder", order });
 }
 
 function escapeHtml(str) {

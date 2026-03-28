@@ -2,12 +2,26 @@
 let autoplayEnabled = false;
 let isAdvancing = false;
 const injectedTabs = new Set();
-
-// Load saved autoplay state
-chrome.storage.local.get("autoplayEnabled", (data) => {
+let customTabOrder = []; // user-defined playlist order (tab IDs)
+// Load saved state and clean up stale tab IDs
+chrome.storage.local.get(["autoplayEnabled", "tabOrder"], async (data) => {
   autoplayEnabled = !!data.autoplayEnabled;
+  customTabOrder = data.tabOrder || [];
+
+  // Remove tab IDs that no longer exist (stale from previous sessions)
+  if (customTabOrder.length > 0) {
+    const allTabs = await chrome.tabs.query({});
+    const validIds = new Set(allTabs.map((t) => t.id));
+    const cleaned = customTabOrder.filter((id) => validIds.has(id));
+    if (cleaned.length !== customTabOrder.length) {
+      customTabOrder = cleaned;
+      chrome.storage.local.set({ tabOrder: customTabOrder });
+    }
+  }
+
   if (autoplayEnabled) injectMonitorIntoAllTabs();
 });
+
 
 // Inject monitor into a tab using TWO scripts:
 // 1. MAIN world script: listens for video "ended" event, dispatches a custom DOM event
@@ -100,9 +114,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectedTabs.delete(tabId);
+  customTabOrder = customTabOrder.filter((id) => id !== tabId);
+  chrome.storage.local.set({ tabOrder: customTabOrder });
 });
 
-// Get ordered list of tabs that have a video element
+// Get ordered list of tabs that have a video element, respecting custom order
 async function getVideoTabs() {
   const allTabs = await chrome.tabs.query({});
   const videoTabs = [];
@@ -117,6 +133,19 @@ async function getVideoTabs() {
       if (results[0]?.result) videoTabs.push(tab);
     } catch (e) {}
   }
+
+  // Sort by custom order if set
+  if (customTabOrder.length > 0) {
+    videoTabs.sort((a, b) => {
+      const ai = customTabOrder.indexOf(a.id);
+      const bi = customTabOrder.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }
+
   return videoTabs;
 }
 
@@ -258,13 +287,40 @@ function toggleMedia() {
     elements.forEach((el) => { if (!el.paused) el.pause(); });
     return "paused";
   } else {
-    const resumable = elements.filter((el) => el.currentTime > 0);
-    if (resumable.length > 0) {
-      resumable.forEach((el) => el.play());
+    // Play the first available media element (even if it hasn't played before)
+    if (elements.length > 0) {
+      elements[0].play().catch(() => {
+        // Try clicking YouTube's play button as fallback
+        const btn = document.querySelector(".ytp-play-button");
+        if (btn) btn.click();
+      });
       return "playing";
     }
   }
   return "unknown";
+}
+
+// Pause media and exit PiP in all tabs except the given one
+async function pauseOtherTabs(exceptTabId) {
+  const allTabs = await chrome.tabs.query({});
+  for (const tab of allTabs) {
+    if (tab.id === exceptTabId) continue;
+    if (!tab.audible) continue;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // Exit PiP if active on this tab
+          if (document.pictureInPictureElement) {
+            document.exitPictureInPicture().catch(() => {});
+          }
+          document.querySelectorAll("video, audio").forEach((el) => {
+            if (!el.paused) el.pause();
+          });
+        },
+      });
+    } catch (e) {}
+  }
 }
 
 function togglePip() {
@@ -283,6 +339,28 @@ function togglePip() {
 chrome.runtime.onInstalled.addListener(() => {
   updateExtensionIcon();
   if (autoplayEnabled) injectMonitorIntoAllTabs();
+
+  // Create context menu for videos
+  chrome.contextMenus.create({
+    id: "add-to-tab-media-player",
+    title: "Add to Tab Media Player",
+    contexts: ["link", "video"],
+  });
+});
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === "add-to-tab-media-player") {
+    const url = info.linkUrl || (tab && tab.url) || "";
+    if (!url) return;
+
+    // Open in a new background tab (active: false so current video keeps playing)
+    const newTab = await chrome.tabs.create({ url, active: false });
+
+    // Add to the end of the custom tab order so autoplay reaches it last
+    customTabOrder.push(newTab.id);
+    chrome.storage.local.set({ tabOrder: customTabOrder });
+  }
 });
 
 // Handle messages
@@ -300,10 +378,80 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "toggleTab") {
-    chrome.scripting
-      .executeScript({ target: { tabId: message.tabId }, func: toggleMedia })
-      .then((r) => sendResponse(r[0]?.result || "unknown"))
-      .catch(() => sendResponse("error"));
+    (async () => {
+      try {
+        // Check actual media state in the tab
+        let mediaState = "no-media";
+        try {
+          const r = await chrome.scripting.executeScript({
+            target: { tabId: message.tabId },
+            func: () => {
+              const els = document.querySelectorAll("video, audio");
+              for (const el of els) {
+                if (!el.paused) return "playing";
+                if (el.currentTime > 0) return "paused";
+              }
+              return els.length > 0 ? "has-media" : "no-media";
+            },
+          });
+          mediaState = r[0]?.result || "no-media";
+        } catch (e) {}
+
+        if (mediaState === "playing" || mediaState === "paused") {
+          // If we're about to play (currently paused), pause all others first
+          if (mediaState === "paused") {
+            await pauseOtherTabs(message.tabId);
+          }
+          // Tab has interactable media — toggle it directly
+          const r = await chrome.scripting.executeScript({
+            target: { tabId: message.tabId }, func: toggleMedia,
+          });
+          sendResponse(r[0]?.result || "unknown");
+        } else {
+          // Tab has never-played media or no media yet.
+          // Pause all other tabs before playing this one.
+          await pauseOtherTabs(message.tabId);
+          // Respond immediately (popup may close when we activate the tab).
+          sendResponse("playing");
+
+          // Activate tab, then explicitly play the video after it's ready.
+          const tab = await chrome.tabs.get(message.tabId);
+          await chrome.tabs.update(message.tabId, { active: true });
+          if (tab.windowId) {
+            await chrome.windows.update(tab.windowId, { focused: true });
+          }
+
+          // Retry playing with increasing delays (tab may need time to load)
+          for (let attempt = 0; attempt < 5; attempt++) {
+            await new Promise((r) => setTimeout(r, 500 + attempt * 500));
+            try {
+              const r = await chrome.scripting.executeScript({
+                target: { tabId: message.tabId },
+                world: "MAIN",
+                func: () => {
+                  const v = document.querySelector("video");
+                  if (!v) return "no-video";
+                  if (!v.paused) return "already-playing";
+                  try {
+                    v.play();
+                    return "playing";
+                  } catch (e) {
+                    // Try YouTube play button as fallback
+                    const btn = document.querySelector(".ytp-play-button");
+                    if (btn) { btn.click(); return "clicked-yt"; }
+                    return "failed";
+                  }
+                },
+              });
+              const result = r[0]?.result;
+              if (result === "playing" || result === "already-playing" || result === "clicked-yt") break;
+            } catch (e) {}
+          }
+        }
+      } catch (e) {
+        try { sendResponse("error"); } catch (_) {}
+      }
+    })();
     return true;
   }
 
@@ -361,21 +509,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === "setTabOrder") {
+    customTabOrder = message.order || [];
+    chrome.storage.local.set({ tabOrder: customTabOrder });
+    sendResponse(true);
+    return true;
+  }
+
+  if (message.action === "getTabOrder") {
+    sendResponse(customTabOrder);
+    return true;
+  }
+
   if (message.action === "getMediaState") {
-    chrome.scripting
-      .executeScript({
-        target: { tabId: message.tabId },
-        func: () => {
-          const mediaElements = document.querySelectorAll("video, audio");
-          for (const el of mediaElements) {
-            if (!el.paused) return "playing";
-            if (el.currentTime > 0) return "paused";
-          }
-          return "unknown";
-        },
-      })
-      .then((r) => sendResponse(r[0]?.result || "unknown"))
-      .catch(() => sendResponse("error"));
+    (async () => {
+      try {
+        // Check if the tab is actually audible — the most reliable "playing" signal
+        const tab = await chrome.tabs.get(message.tabId);
+        const r = await chrome.scripting.executeScript({
+          target: { tabId: message.tabId },
+          func: () => {
+            const mediaElements = document.querySelectorAll("video, audio");
+            for (const el of mediaElements) {
+              if (!el.paused) return "playing";
+              if (el.currentTime > 0) return "paused";
+            }
+            return "unknown";
+          },
+        });
+        let state = r[0]?.result || "unknown";
+        // If script says "playing" but tab isn't audible, it's likely a background tab
+        // where YouTube auto-started but audio isn't actually flowing
+        if (state === "playing" && !tab.audible) {
+          state = "paused";
+        }
+        sendResponse(state);
+      } catch (e) {
+        sendResponse("error");
+      }
+    })();
     return true;
   }
 });
