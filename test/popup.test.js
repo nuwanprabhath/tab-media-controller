@@ -1,7 +1,4 @@
-/**
- * @jest-environment jsdom
- */
-
+/** @jest-environment happy-dom */
 // ============================================================
 // Pure function tests extracted from popup.js
 // ============================================================

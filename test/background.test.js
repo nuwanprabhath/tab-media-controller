@@ -1,6 +1,4 @@
-/**
- * @jest-environment jsdom
- */
+/** @jest-environment happy-dom */
 const { createChromeMock, loadBackground, getHandler, sendMsg } = require("./chrome-mock");
 
 let cm, handler;

@@ -76,11 +76,17 @@ tab-media-controller/
 ├── background.js    # Service worker - shortcuts, messaging, autoplay, PiP, context menu, exclusive playback
 ├── popup.html       # Popup UI and styles
 ├── popup.js         # Popup logic - tab listing, controls, state refresh, autoplay toggle
+├── bunfig.toml      # Bun configuration (test preload)
+├── package.json     # Dependencies and scripts
 ├── icons/
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-└── README.md
+└── test/
+    ├── setup.js          # jsdom global setup for tests
+    ├── chrome-mock.js    # Chrome API mock helpers
+    ├── background.test.js
+    └── popup.test.js
 ```
 
 ## How It Works
@@ -94,16 +100,30 @@ tab-media-controller/
 
 ## Development
 
+### Prerequisites
+
+This project uses [Bun](https://bun.sh) as its runtime and package manager. Install it with:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
 ### Setup
 
 ```bash
-npm install
+bun install
 ```
 
 ### Running Tests
 
 ```bash
-npm test
+bun test
+```
+
+Watch mode:
+
+```bash
+bun test --watch
 ```
 
 Tests cover the background service worker logic (message handling, context menu, tab order, media state, PiP), popup utility functions (time formatting, HTML escaping, sort order, state normalization), and manifest validation.
